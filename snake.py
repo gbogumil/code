@@ -24,9 +24,10 @@ class Player:
 
     speed = 5
     direction = 0.0
-    turnspeed = dtor * 7.0 # measured in radians
+    turnspeed = dtor * 5.0 # measured in radians
     speedspeed = 0.25
     maxspeed = 32
+    minspeed = 3
 
     def __init__(self):
         self.positions.append((10.0,10.0, self.direction))
@@ -36,27 +37,37 @@ class Player:
         # calculate the position based on the angle the snake is moving
         deltax = self.speed * math.cos(self.direction)
         deltay = self.speed * math.sin(self.direction)
-        if pos[0] + deltax > app.windowWidth or \
-            pos[0] + deltax < 0:
+
+        if pos[0] + deltax > app.windowWidth or pos[0] + deltax < 0:
             newx = pos[0] - deltax
-            self.direction = self.direction - (1-math.cos(self.direction))
+            newdir = math.acos(-1.0 * math.cos(self.direction))
+            #if self.direction > math.pi:
+            #    newdir = newdir + math.pi
+            logging.info('width -> dir {0} newdir {1}'.format(self.direction, newdir))
+            self.direction = newdir
         else:
             newx = pos[0] + deltax
         
-        if pos[1] + deltay > app.windowHeight or \
-            pos[1] + deltay < 0:
+        self.direction = self.direction % (2.0 * math.pi)        
+
+        if pos[1] + deltay > app.windowHeight or pos[1] + deltay < 0:
             newy = pos[1] - deltay
-            self.direction = self.direction - (1-math.sin(self.direction))
+            newdir = math.asin(-1.0 * math.sin(self.direction))
+            #if self.direction > math.pi:
+            #    newdir = newdir + math.pi
+            logging.info('height -> dir {0} newdir {1}'.format(self.direction, newdir))
+            self.direction = newdir
         else:
             newy = pos[1] + deltay
-        
+
+        self.direction = self.direction % (2.0 * math.pi)  
+
         newpos = (newx,newy,self.direction)
         # if we run into ourself then chop off the tail
         # skip the last 5 in the array (which is the head + 4)
         for i in range(0,max(0,len(self.positions)-1-5)):
             boxsize = min(4, self.speed/1.5)
             if self.hit(self.positions[i], newpos,boxsize):
-                logging.info('chopping tail at {0}'.format(i))
                 self.positions = self.positions[i+1::]
                 break
         # this lets the positions flow through the array
@@ -77,8 +88,8 @@ class Player:
 
     def speedDown(self):
         self.speed = self.speed - self.speedspeed
-        if self.speed < 1:
-            self.speed = 1
+        if self.speed < self.minspeed:
+            self.speed = self.minspeed
     
     def hit(self, pos1, pos2, boxsize):
         return \
@@ -115,7 +126,6 @@ class App:
         self._display_surf.fill((0,0,0))
 
         i = 0
-
         for i in range(0,len(self.player.positions)):
             pos = self.player.positions[i]
             wrappedpos = (pos[0]%self.windowWidth,pos[1]%self.windowHeight)
@@ -123,8 +133,7 @@ class App:
             rotdeg = -360.0 * pos[2] / math.pi / 2.0
 
             self._display_surf.blit(
-                pygame.transform.rotate(self._image_surf,rotdeg), \
-                wrappedpos)
+                pygame.transform.rotate(self._image_surf,rotdeg), pos[0:2])
         pygame.display.flip()
  
     def on_cleanup(self):
