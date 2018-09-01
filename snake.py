@@ -11,12 +11,17 @@ dtor = math.pi * 2.0 / 360.0
 
 max = lambda x,y: x if x > y else y
 min = lambda x,y: x if x < y else y
+current_milli = lambda: int(round(time.time() * 1000))
 
 class Edible:
     position = (0,0)
+    value = 1
 
-    def __init__(self, x, y):
+    def __init__(self, x, y, value):
         position = (x,y)
+
+    def update(self, app):
+        pass
 
 class Player:
     positions = []
@@ -28,39 +33,44 @@ class Player:
     speedspeed = 0.25
     maxspeed = 32
     minspeed = 3
+    app = None
 
-    def __init__(self):
+    bounce = True
+
+    def __init__(self, app):
         self.positions.append((10.0,10.0, self.direction))
+        self.app = app
 
-    def update(self, app):
-        pos = self.positions[len(self.positions)-1]
+    def bounce(self, pos):
         # calculate the position based on the angle the snake is moving
         deltax = self.speed * math.cos(self.direction)
         deltay = self.speed * math.sin(self.direction)
-
-        if pos[0] + deltax > app.windowWidth or pos[0] + deltax < 0:
-            newx = pos[0] - deltax
-            newdir = math.acos(-1.0 * math.cos(self.direction))
-            #if self.direction > math.pi:
-            #    newdir = newdir + math.pi
-            logging.info('width -> dir {0} newdir {1}'.format(self.direction, newdir))
-            self.direction = newdir
-        else:
-            newx = pos[0] + deltax
+        newx = pos[0] + deltax
+        newy = pos[1] + deltay
+        newdir = self.direction
         
-        self.direction = self.direction % (2.0 * math.pi)        
-
-        if pos[1] + deltay > app.windowHeight or pos[1] + deltay < 0:
+        # did we hit the top or bottom
+        if newy <= 0 or newy >= self.app.windowHeight:
             newy = pos[1] - deltay
-            newdir = math.asin(-1.0 * math.sin(self.direction))
-            #if self.direction > math.pi:
-            #    newdir = newdir + math.pi
-            logging.info('height -> dir {0} newdir {1}'.format(self.direction, newdir))
-            self.direction = newdir
-        else:
-            newy = pos[1] + deltay
+            newdir = (2 * math.pi) - self.direction
+        # did we hit the right or left
+        if newx < 0 or newx >= self.app.windowWidth:
+            newx = pos[0] - deltax
+            newdir = (2 * math.pi) - ((self.direction + (math.pi / 2) % (2 * math.pi))) - (math.pi / 2)
+        #ensure direction stays in 0..2pi
+        newdir = newdir % (2 * math.pi)
+        fmt = '\n{0:.2f}, {1:.2f} {2:.2f}\n{3:.2f}, {4:.2f} {5:.2f}\n{6:.2f}, {7:.2f}'
+        logging.info(fmt.format(pos[0], pos[1], self.direction, newx, newy, newdir, deltax, deltay))
+        return newx, newy, newdir
 
-        self.direction = self.direction % (2.0 * math.pi)  
+    def update(self, app):
+        newx = 0
+        newy = 0
+
+        if self.bounce:
+            newx, newy, self.direction = self.bounce(self.positions[len(self.positions)-1])
+        else:
+            pass
 
         newpos = (newx,newy,self.direction)
         # if we run into ourself then chop off the tail
@@ -74,7 +84,7 @@ class Player:
         if len(self.positions)  >= self.maxlength:
             self.positions.remove(self.positions[0])
         self.positions.append(newpos)
-    
+
     def moveClock(self):
         self.direction = (self.direction + self.turnspeed) % (2.0 * math.pi)
 
@@ -101,15 +111,18 @@ class Player:
 class App:
     windowWidth = 800
     windowHeight = 600
-    player = Player()
+    player = None
+    edibles = []
 
     def on_init(self):
+        self.player = Player(self)
+        self.edibles.append(Edible(50, 50, 1))
         pygame.init()
         windowSize = (self.windowWidth,self.windowHeight)
         self._display_surf = pygame.display.set_mode(
             (windowSize), pygame.HWSURFACE)
  
-        pygame.display.set_caption('Pygame pythonspot.com example')
+        pygame.display.set_caption('Snakey eats shiney edibles')
         self._running = True
         self._image_surf = pygame.image.load("pygame.png")
         self._image_surf.set_colorkey(self._image_surf.get_at((0,0)), RLEACCEL)   
@@ -142,30 +155,43 @@ class App:
     def on_execute(self):
         if self.on_init() == False:
             self._running = False
- 
+        actionmap = {
+            K_RIGHT: self.player.moveClock,
+            K_LEFT: self.player.moveCounter,
+            K_UP: self.player.speedUp,
+            K_DOWN: self.player.speedDown
+        }
+
+        update_freq = 1000 / 30 # 30 times per second
+        nextupdate = current_milli() + update_freq
+        lastkey = None
         while( self._running ):
             pygame.event.pump()
             keys = pygame.key.get_pressed() 
  
             if (keys[K_RIGHT]):
-                self.player.moveClock()
- 
+                lastkey = K_RIGHT
             if (keys[K_LEFT]):
-                self.player.moveCounter()
- 
+                lastkey = K_LEFT
             if (keys[K_UP]):
-                self.player.speedUp()
- 
+                lastkey = K_UP
             if (keys[K_DOWN]):
-                self.player.speedDown()
- 
+                lastkey = K_DOWN
             if (keys[K_ESCAPE]):
                 self._running = False
 
             if self._running:
-                self.player.update(self)
+                if nextupdate < current_milli():
+                    nextupdate = current_milli() + update_freq
+                    action = actionmap.get(lastkey, lambda:0)
+                    lastkey = None
+                    action()
+                    self.player.update(self)
+                    for e in self.edibles:
+                        e.update(self)
                 self.on_loop()
                 self.on_render()
+            
         self.on_cleanup()
  
 if __name__ == "__main__" :
