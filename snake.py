@@ -26,8 +26,8 @@ class Player:
     maxlength = 250
     minlength = 5
 
-    turnspeed = deg_to_rad * 5.0 # measured in radians
-    speedspeed = 0.35
+    turnspeed = deg_to_rad * 6.0 # measured in radians
+    speedspeed = 0.4
     maxspeed = 10
     minspeed = 3
 
@@ -309,9 +309,13 @@ class App:
         self._display_surf.fill((0,0,0))
 
         for e in self.edibles:
-            self._display_surf.blit(
-                self._images['edible'], e.position[0:2]
-            )
+#            self._display_surf.blit(
+#                self._images['edible'], e.position[0:2]
+#            )
+            scaledColorComponent = int((e.value / 10.0 * 255) % 255)
+            c = Color(scaledColorComponent, 0, scaledColorComponent, 0)
+            p = e.position
+            pygame.draw.circle(self._display_surf, c, (int(p[0]), int(p[1])), 3, 1)
         for d in self.drones:
             self.drawPlayer(d, 'drone')
         self.drawPlayer(self.player, 'player')
