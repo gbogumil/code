@@ -14,11 +14,9 @@ min = lambda x,y: x if x < y else y
 current_milli = lambda: int(round(time.time() * 1000))
 
 class Edible:
-    position = [0,0]
-    value = 1
-
     def __init__(self, x, y, value):
         self.position = [x,y]
+        self.value = value
 
     def update(self, app):
         pass
