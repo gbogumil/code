@@ -25,29 +25,26 @@ class Edible:
 
 
 class Player:
-    positions = []
     maxlength = 250
     minlength = 5
-    nextPos = None
-    nextSpeed = None
-    nextDir = None
 
-    speed = 5
-    direction = 0.0
     turnspeed = deg_to_rad * 5.0 # measured in radians
     speedspeed = 0.25
-    maxspeed = 32
+    maxspeed = 25
     minspeed = 3
 
-    cooldown = 10
-
     def __init__(self, x, y):
+        self.positions = []
+        self.speed = self.minspeed
+        self.cooldown = 10
         self.direction = (2.0 * math.pi) * rand()
         for i in range(0, 5):
             self.positions.append((x, y, self.direction))
         self.nextPos = self.positions[-1]
         self.nextSpeed = self.speed
         self.nextDir = self.direction
+        self.moveGenerator = self.randomGenerator()
+        self.speedGenerator = self.randomGenerator()
         logging.info('created player {0:.3f} {1:.2f},{2:.2f} {3:.2f}'.format(
             self.direction, self.positions[-1][0], self.positions[-1][1], self.speed
         ))
@@ -87,22 +84,14 @@ class Player:
         if len(self.positions) > self.maxlength:
             self.positions = self.positions[:-maxlength]
     
-    def randomMoveGenerator(self):
+    def randomGenerator(self):
         while True:
             ret = rand() * 3.0
             for i in range(0,self.cooldown+1):
-                logging.info('move {0} {1:.2f}'.format(i, ret))
-                yield ret
-
-    def randomSpeedGenerator(self):
-        while True:
-            ret = rand() * 3.0
-            for i in range(0,self.cooldown+1):
-                logging.info('speed {0} {1:.2f}'.format(i, ret))
                 yield ret
 
     def indicateIntent(self):
-        move = next(self.randomMoveGenerator())
+        move = next(self.moveGenerator)
         if move < 1.0:
             self.moveClock()
         elif move < 2.0:
@@ -110,7 +99,7 @@ class Player:
         else:
             self.moveCounter()
 
-        speed = next(self.randomSpeedGenerator())
+        speed = next(self.speedGenerator)
         if speed < 1.0:
             self.speedUp()
         elif speed < 2.0:
@@ -118,17 +107,30 @@ class Player:
         else:
             self.speedDown()
 
+    def toString(self):
+        # speed direction cooldown positions position[-1]
+        fmt = '{0} {1:.2f} {2} {3} {4:.2f} {5:.2f}'
+        return fmt.format(
+            self.speed, 
+            self.direction, 
+            self.cooldown, 
+            len(self.positions),
+            self.positions[-1][0], 
+            self.positions[-1][1]
+        )
 
 class App:
-    drawDebug = True
+    drawDebug = False
     windowWidth = 800
     windowHeight = 600
     player = None
     drones = []
-    droneCount = 1
+    droneCount = 4
     edibles = []
     _images = {}
     hitBox = None
+    playerGenerator = None
+    ediblesGenerator = None
 
     def createPlayer(self):
         while True:
@@ -139,7 +141,7 @@ class App:
             )
             yield Player(initialpos[0], initialpos[1])
 
-    def ediblesGenerator(self):
+    def createEdible(self):
         while True:
             border = 100
             initialpos = (
@@ -249,14 +251,16 @@ class App:
     def on_init(self):
         pygame.init()
 
-        self.player = next(self.createPlayer())
+        playerGenerator = self.createPlayer()
+        self.player = next(playerGenerator)
         for droneindex in range(0,self.droneCount):
-            drone = next(self.createPlayer())
-            drone.cooldown = (1+droneindex) * 200
+            drone = next(playerGenerator)
+            drone.cooldown = (1+droneindex) * 10
             logging.info('cooldown set to {0}'.format(drone.cooldown))
             self.drones.append(drone)
 
-        initialEdibles = (next(self.ediblesGenerator()) for i in range(0,150))
+        self.ediblesGenerator = self.createEdible()
+        initialEdibles = (next(self.ediblesGenerator) for i in range(0,150))
         for e in initialEdibles:
             self.edibles.append(e)
 
@@ -271,6 +275,10 @@ class App:
         self._images['snake'] = pygame.transform.scale(i, (int(i.get_rect().width/2), int(i.get_rect().height/2)))
         self._images['edible'] = self.loadimage('edible.png', True)
 
+        logging.info('players created')
+        logging.info('player = {0}'.format(self.player.toString()))
+        for index in range(0, len(self.drones)):
+            logging.info('drone {0} = {1}'.format(index, self.drones[index].toString()))
     def loadimage(self, filelocation, transparent):
         ret = pygame.image.load(filelocation)
         if transparent:
