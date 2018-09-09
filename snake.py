@@ -51,6 +51,7 @@ class Player:
         logging.info('created player {0:.3f} {1:.2f},{2:.2f} {3:.2f}'.format(
             self.direction, self.positions[-1][0], self.positions[-1][1], self.speed
         ))
+        self.storedGrowth = 0
 
     def update(self, app):
         # determine the desired next position * direction
@@ -82,10 +83,7 @@ class Player:
             self.nextSpeed = self.minspeed
 
     def grow(self, value):
-        for i in range(0,value):
-            self.positions.insert(0,self.positions[0])
-        if len(self.positions) > self.maxlength:
-            self.positions = self.positions[:-self.maxlength]
+        self.storedGrowth += value
     
     def randomGenerator(self):
         while True:
@@ -124,34 +122,46 @@ class Player:
         )
 
 class App:
-    drawDebug = False
-    windowWidth = 800
-    windowHeight = 600
-    player = None
-    drones = []
-    droneCount = 4
-    edibles = []
-    _images = {}
-    hitBox = None
-    playerGenerator = None
-    ediblesGenerator = None
+    # conversion to viewport of main player within largerworld
+        # need a viewport size
+        # game dimension need to be determined either 
+            # finite bounded
+                # with death at edge
+                # with bounce
+            # finite unbounded
+
+    def __init__(self):
+        self.hitBox = None
+        self.drones = []
+        self.drawDebug = True
+        self.viewportWidth = 800
+        self.viewportHeight = 600
+        self.worldWidth = self.viewportWidth * 4
+        self.worldHeight = self.viewportHeight * 4
+        self.border = 100
+        self.player = None
+        self.drones = []
+        self.droneCount = 4
+        self.edibles = []
+        self._images = {}
+        self.playerGenerator = None
+        self.ediblesGenerator = None
+        self.debugFont = None
+
+    def randomPosition(self):
+        return (
+                rand() * (self.worldWidth - (2 * self.border)) + self.border,
+                rand() * (self.worldHeight - (2 * self.border)) + self.border
+        )
 
     def createPlayer(self):
         while True:
-            border = 100
-            initialpos = (
-                rand() * (self.windowWidth - (2 * border)) + border,
-                rand() * (self.windowHeight - (2 * border)) + border
-            )
+            initialpos = self.randomPosition()
             yield Player(initialpos[0], initialpos[1])
 
     def createEdible(self):
         while True:
-            border = 100
-            initialpos = (
-                rand() * (self.windowWidth - (2 * border)) + border,
-                rand() * (self.windowHeight - (2 * border)) + border
-            )
+            initialpos = self.randomPosition()
             v = int(rand() * 10)
             yield Edible(initialpos[0], initialpos[1], v)
 
@@ -165,11 +175,11 @@ class App:
         newdir = player.direction
         
         # did we hit the top or bottom
-        if newy <= 0 or newy >= self.windowHeight:
+        if newy <= 0 or newy >= self.worldHeight:
             newy = pos[1] - deltay
             newdir = (2 * math.pi) - player.direction
         # did we hit the right or left
-        if newx < 0 or newx >= self.windowWidth:
+        if newx < 0 or newx >= self.worldWidth:
             newx = pos[0] - deltax
             newdir = (2 * math.pi) - ((player.direction + (math.pi / 2) % (2 * math.pi))) - (math.pi / 2)
         #ensure direction stays in 0..2pi
@@ -179,9 +189,12 @@ class App:
     def playerWrap(self, player):
         pos = player.nextPos
         player.direction = player.nextDir
-        pos = (pos[0] % self.windowWidth, pos[1] % self.windowHeight, player.direction)
+        pos = (pos[0] % self.worldWidth, pos[1] % self.worldHeight, player.direction)
         player.positions.append(pos)
-        player.positions.remove(player.positions[0])
+        if player.storedGrowth == 0:
+            player.positions.remove(player.positions[0])
+        else:
+            player.storedGrowth -= 1
         player.speed = player.nextSpeed
 
     def playerUpdate(self, player):
@@ -242,16 +255,24 @@ class App:
             pos[1] > box.top and \
             pos[1] < box.bottom
 
-    def drawPlayer(self, player, imageName):
+    def drawPlayer(self, player, imageName, drawableArea):
         for i in range(0,len(player.positions)):
             pos = player.positions[i]
+            newpos = (
+                pos[0] - drawableArea[0],
+                pos[1] - drawableArea[1]
+            )
 
             rotdeg = -360.0 * pos[2] / math.pi / 2.0
             self._display_surf.blit(
-                pygame.transform.rotate(self._images[imageName],rotdeg), pos[0:2])
+                pygame.transform.rotate(self._images[imageName],rotdeg), newpos)
+
+    def safePos(self, pos):
+        return '({0:.2f}, {1:.2f}, {2:.2f})'.format(pos[0], pos[1], pos[2])
 
     def on_init(self):
         pygame.init()
+        self.debugFont = pygame.font.Font(None, 20)
 
         playerGenerator = self.createPlayer()
         self.player = next(playerGenerator)
@@ -266,7 +287,7 @@ class App:
         for e in initialEdibles:
             self.edibles.append(e)
 
-        windowSize = (self.windowWidth,self.windowHeight)
+        windowSize = (self.viewportWidth,self.viewportHeight)
         self._display_surf = pygame.display.set_mode(
             (windowSize), pygame.HWSURFACE)
  
@@ -308,7 +329,7 @@ class App:
     def on_loop(self):
         pass
  
-    def on_render_edibles(self):
+    def on_render_edibles(self, drawableArea):
         for e in self.edibles:
             maxEdibleValue = 10.0
             maxColorValue = 255
@@ -318,27 +339,65 @@ class App:
             colorComponent = int(colorComponent % maxColorValue)
             radius = int(colorComponent * maxEdibleValue / maxColorValue)
             c = Color(colorComponent, 0, colorComponent, 0)
-            p = (int(e.position[0]), int(e.position[1]))
+            p = (
+                int(e.position[0] - drawableArea[0]), 
+                int(e.position[1] - drawableArea[1])
+            )
             pygame.draw.circle(self._display_surf, c, p, radius, circleWidth)
 
-    def on_render_drones(self):
+    def on_render_drones(self, drawableArea):
         for d in self.drones:
-            self.drawPlayer(d, 'drone')
+            self.drawPlayer(d, 'drone', drawableArea)
 
-    def on_render_player(self):
-        self.drawPlayer(self.player, 'player')
+    def on_render_player(self, drawableArea):
+        self.drawPlayer(self.player, 'player', drawableArea)
 
-    def on_render_debug(self):
+    def on_render_debug(self, drawableArea, extras = None):
         if self.drawDebug:
             if self.hitBox:
-                self._display_surf.fill((255,255,0), self.hitBox)
+                newbox = Rect(
+                    self.hitBox.left - drawableArea[0], 
+                    self.hitBox.top - drawableArea[1],
+                    self.hitBox.width,
+                    self.hitBox.height)
+                self._display_surf.fill((255,255,0), newbox)
+            
+            if extras:
+                offset = 0
+                for extra in extras:
+                    text = '{0}'.format(extra)
+                    s = self.debugFont.render(text, False, Color(255,255,255))
+                    self._display_surf.blit(s, (0, offset))
+                    offset += self.debugFont.size(text)[1] + 10
 
     def on_render(self):
+        # center viewport as closely as possible to player
+        # only render items within the viewport
+        drawableArea = [
+            self.player.positions[-1][0] - (self.viewportWidth / 2),
+            self.player.positions[-1][1] - (self.viewportHeight / 2)
+        ]
+        if drawableArea[0] < 0:
+            drawableArea[0] = 0
+        elif drawableArea[0] > self.worldWidth - self.viewportWidth:
+            drawableArea[0] = self.worldWidth - self.viewportWidth
+        if drawableArea[1] < 0:
+            drawableArea[1] = 0
+        elif drawableArea[1] > self.worldHeight - self.viewportHeight:
+            drawableArea[1] = self.worldHeight - self.viewportHeight
+        
         self._display_surf.fill((0,0,0))
-        self.on_render_edibles()
-        self.on_render_drones()
-        self.on_render_player()
-        self.on_render_debug()
+
+        self.on_render_edibles(drawableArea)
+        self.on_render_drones(drawableArea)
+        self.on_render_player(drawableArea)
+
+        extras = [self.safePos(self.player.positions[-1])]
+        for d in self.drones:
+            extras.append(self.safePos(d.positions[-1]))
+
+        self.on_render_debug(drawableArea, extras)
+        
         pygame.display.flip()
  
     def on_cleanup(self):
@@ -380,6 +439,8 @@ class App:
                 self._running = False
             if (keys[K_PAUSE]):
                 self._paused = not self._paused
+            if (keys[K_d]):
+                self.drawDebug = not self.drawDebug
 
             if self._running:
                 if not self._paused and nextupdate < current_milli():
