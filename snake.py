@@ -8,6 +8,8 @@ import random
 rand = random.random
 
 deg_to_rad = math.pi * 2.0 / 360.0
+twopi = 2.0 * math.pi
+halfpi = math.pi / 2.0
 
 max = lambda x,y: x if x > y else y
 min = lambda x,y: x if x < y else y
@@ -23,6 +25,7 @@ class Edible:
 
 
 class Player:
+    instanceCounter = 0
     maxlength = 250
     minlength = 5
 
@@ -32,6 +35,8 @@ class Player:
     minspeed = 3
 
     def __init__(self, x, y):
+        self.identifier = self.instanceCounter
+        self.instanceCounter += 1
         self.positions = []
         self.speed = self.minspeed
         self.cooldown = 10
@@ -169,8 +174,6 @@ class App:
             newdir = (2 * math.pi) - ((player.direction + (math.pi / 2) % (2 * math.pi))) - (math.pi / 2)
         #ensure direction stays in 0..2pi
         newdir = newdir % (2 * math.pi)
-        #fmt = '\n{0:.2f}, {1:.2f} {2:.2f}\n{3:.2f}, {4:.2f} {5:.2f}\n{6:.2f}, {7:.2f}'
-        #logging.info(fmt.format(pos[0], pos[1], self.direction, newx, newy, newdir, deltax, deltay))
         return newx, newy, newdir
 
     def playerWrap(self, player):
@@ -215,7 +218,7 @@ class App:
         # 3> eventually if any players died by running into each other
 
     def chopPlayer(self, player, i):
-        logging.info('chopping at {0}'.format(i))
+        logging.info('chopping p{1} at {0}'.format(i, player.identifier))
         newEdibles = player.positions[:i]
         player.positions = player.positions[i+1:]
         for p in newEdibles:
@@ -305,25 +308,37 @@ class App:
     def on_loop(self):
         pass
  
-    def on_render(self):
-        self._display_surf.fill((0,0,0))
-
+    def on_render_edibles(self):
         for e in self.edibles:
-#            self._display_surf.blit(
-#                self._images['edible'], e.position[0:2]
-#            )
-            scaledColorComponent = int((e.value / 10.0 * 255) % 255)
-            c = Color(scaledColorComponent, 0, scaledColorComponent, 0)
-            p = e.position
-            pygame.draw.circle(self._display_surf, c, (int(p[0]), int(p[1])), 3, 1)
+            maxEdibleValue = 10.0
+            maxColorValue = 255
+            minColorLevel = 2
+            circleWidth = 2
+            colorComponent = max(e.value, minColorLevel) / maxEdibleValue * maxColorValue
+            colorComponent = int(colorComponent % maxColorValue)
+            radius = int(colorComponent * maxEdibleValue / maxColorValue)
+            c = Color(colorComponent, 0, colorComponent, 0)
+            p = (int(e.position[0]), int(e.position[1]))
+            pygame.draw.circle(self._display_surf, c, p, radius, circleWidth)
+
+    def on_render_drones(self):
         for d in self.drones:
             self.drawPlayer(d, 'drone')
+
+    def on_render_player(self):
         self.drawPlayer(self.player, 'player')
 
+    def on_render_debug(self):
         if self.drawDebug:
             if self.hitBox:
                 self._display_surf.fill((255,255,0), self.hitBox)
 
+    def on_render(self):
+        self._display_surf.fill((0,0,0))
+        self.on_render_edibles()
+        self.on_render_drones()
+        self.on_render_player()
+        self.on_render_debug()
         pygame.display.flip()
  
     def on_cleanup(self):
