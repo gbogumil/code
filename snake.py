@@ -122,14 +122,6 @@ class Player:
         )
 
 class App:
-    # conversion to viewport of main player within largerworld
-        # need a viewport size
-        # game dimension need to be determined either 
-            # finite bounded
-                # with death at edge
-                # with bounce
-            # finite unbounded
-
     def __init__(self):
         self.hitBox = None
         self.drones = []
@@ -141,12 +133,14 @@ class App:
         self.border = 100
         self.player = None
         self.drones = []
-        self.droneCount = 4
+        self.droneCount = 20
         self.edibles = []
         self._images = {}
         self.playerGenerator = None
         self.ediblesGenerator = None
         self.debugFont = None
+        self.edibleValueMax = 20
+        self.initialEdibles = 300
 
     def randomPosition(self):
         return (
@@ -162,7 +156,7 @@ class App:
     def createEdible(self):
         while True:
             initialpos = self.randomPosition()
-            v = int(rand() * 10)
+            v = int(rand() * self.edibleValueMax)
             yield Edible(initialpos[0], initialpos[1], v)
 
     def playerBounce(self, player):
@@ -241,12 +235,6 @@ class App:
         player.grow(edible.value)
         self.edibles.remove(edible)
         #self.edibles.append(next(self.ediblesGenerator()))
-        if len(player.positions) > player.maxlength:
-            chop = len(player.positions) - player.maxlength
-            for i in range(0,chop):
-                p = player.positions[i]
-                self.edibles.append(Edible(p[0], p[1]), 1)
-            player.positions = player.positions[:-player.maxlength]
 
     def hit(self, pos, box):
         return \
@@ -278,12 +266,12 @@ class App:
         self.player = next(playerGenerator)
         for droneindex in range(0,self.droneCount):
             drone = next(playerGenerator)
-            drone.cooldown = (1+droneindex) * 10
+            drone.cooldown = (1+droneindex) * 20
             logging.info('cooldown set to {0}'.format(drone.cooldown))
             self.drones.append(drone)
 
         self.ediblesGenerator = self.createEdible()
-        initialEdibles = (next(self.ediblesGenerator) for i in range(0,150))
+        initialEdibles = (next(self.ediblesGenerator) for i in range(0,self.initialEdibles))
         for e in initialEdibles:
             self.edibles.append(e)
 
@@ -331,18 +319,20 @@ class App:
  
     def on_render_edibles(self, drawableArea):
         for e in self.edibles:
-            maxEdibleValue = 10.0
+            maxEdibleValue = float(self.edibleValueMax)
             maxColorValue = 255
             minColorLevel = 2
-            circleWidth = 2
+
             colorComponent = max(e.value, minColorLevel) / maxEdibleValue * maxColorValue
             colorComponent = int(colorComponent % maxColorValue)
-            radius = int(colorComponent * maxEdibleValue / maxColorValue)
             c = Color(colorComponent, 0, colorComponent, 0)
             p = (
                 int(e.position[0] - drawableArea[0]), 
                 int(e.position[1] - drawableArea[1])
             )
+            radius = max(5, int(colorComponent * maxEdibleValue / maxColorValue))
+            circleWidth = min(2, radius)
+
             pygame.draw.circle(self._display_surf, c, p, radius, circleWidth)
 
     def on_render_drones(self, drawableArea):
