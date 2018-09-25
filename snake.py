@@ -5,6 +5,7 @@ import math
 import logging
 import random
 import functools as ft
+import csv
 
 rand = random.random
 
@@ -38,10 +39,11 @@ class Player:
     def __init__(self, x, y):
         Player.instanceCounter += 1
         self.identifier = Player.instanceCounter
-        self.positions = []
         self.speed = self.minspeed
-        self.cooldown = 10
         self.direction = (2.0 * math.pi) * rand()
+        self.positions = []
+
+        self.cooldown = 10
         for i in range(0, 5):
             self.positions.append((x, y, self.direction))
         self.nextPos = self.positions[-1]
@@ -127,6 +129,8 @@ KEYBOARD = 0
 
 class App:
     def __init__(self):
+        self._instance = int(random.random() * 1e10)
+        self._trainingoutputstep = 1
         self.hitBox = None
         self.drones = []
         self.drawDebug = True
@@ -148,6 +152,15 @@ class App:
         self.initialEdibles = 300
         self._gameOver = False
         self._inputMode = KEYBOARD
+        self._outputTraining = True
+        self._last_keys_for_training = {}
+        self._train_freq = 250
+        self._lastTrainingOutput = current_milli()
+        self._trainfolder = '../data'
+        
+        self._csvwriter = csv.writer(
+            open('{}/dat-{}.csv'.format(self._trainfolder, self._instance), 'a', newline='')
+        )
 
     def randomPosition(self):
         return (
@@ -369,6 +382,34 @@ class App:
             drawableArea[1] = self.worldHeight - self.viewportHeight
         return drawableArea
 
+    def outputTrainFrame(self):
+        # keys is a set of key operations
+        # output all
+        # then output the frame 
+        pygame.image.save(self._display_surf, '{}/img-{}-{}.bmp'.format(
+            self._trainfolder, self._instance, self._trainingoutputstep)
+        )
+        rowdata = [
+            self.trainKeyOutput(K_RIGHT, K_LEFT),
+            self.trainKeyOutput(K_LEFT, K_RIGHT),
+            self.trainKeyOutput(K_UP, K_DOWN),
+            self.trainKeyOutput(K_DOWN, K_UP),
+            len(self.player.positions)
+        ]
+        self._csvwriter.writerow(rowdata)
+        self._trainingoutputstep += 1
+
+    def appendLastKeysForTraining(self, keys):
+        for k in keys:
+            self._last_keys_for_training[k] = self._last_keys_for_training.get(k, 0) + 1
+
+    def trainKeyOutput(self, key1, key2):
+        v1 = self._last_keys_for_training.get(key1, 0)
+        v2 = self._last_keys_for_training.get(key2, 0)
+        if v1 > v2:
+            return 1
+        return 0
+
     def on_event(self, event):
         if event.type == QUIT:
             self._running = False
@@ -487,6 +528,11 @@ class App:
         self.on_render_drones(drawableArea)
         self.on_render_player(drawableArea)
 
+        if self._outputTraining and self._lastTrainingOutput + self._train_freq < current_milli():
+            self._lastTrainingOutput = current_milli()
+            self.outputTrainFrame()
+            self._last_keys_for_training = {}
+
         extras = [self.safePos(self.player.positions[-1])]
         for d in self.drones:
             extras.append(self.safePos(d.positions[-1]))
@@ -506,10 +552,11 @@ class App:
 
         update_freq = 1000 / 30 # 30 times per second
         nextupdate = current_milli() + update_freq
-        keyFreq = 250
+        key_freq = 250
         lastDebugKeyPress = current_milli()
         lastPauseKeyPress = current_milli()
         lastModeKeyPress = current_milli()
+
         keyspressed = set()
 
         while( self._running ):
@@ -527,15 +574,15 @@ class App:
             if keys[K_ESCAPE]:
                 self._running = False
             if keys[K_PAUSE]:
-                if lastPauseKeyPress + keyFreq < current_milli():
+                if lastPauseKeyPress + key_freq < current_milli():
                     lastPauseKeyPress = current_milli()
                     self._paused = not self._paused
             if keys[K_d]:
-                if lastDebugKeyPress + keyFreq < current_milli():
+                if lastDebugKeyPress + key_freq < current_milli():
                     lastDebugKeyPress = current_milli()
                     self.drawDebug = not self.drawDebug
             if keys[K_m]:
-                if lastModeKeyPress + keyFreq < current_milli():
+                if lastModeKeyPress + key_freq < current_milli():
                     lastModeKeyPress = current_milli()
                     if self._inputMode == KEYBOARD:
                         self._inputMode = MOUSE
@@ -554,15 +601,26 @@ class App:
                         keyspressed.add(K_UP)
                     if (keys[K_DOWN]):
                         keyspressed.add(K_DOWN)
+                    if mouse_keys[0] == MOUSEBUTTONDOWN:
+                        keyspressed.add(K_DOWN)
+                    if mouse_keys[2] == MOUSEBUTTONDOWN:
+                        keyspressed.add(K_UP)
+                    # add movement toward current mouse position
+                    if self._inputMode == MOUSE:
+                        deg = math.tanh(-1.0 * mouse_pos[1] / mouse_pos[0])
+                        # TODO: determine if we should rot cl or co
                     if nextupdate < current_milli():
                         # The basic loop will calculate intent of each player
                         # then based on the intent determine if the environment
                         # should affect that intent
                         # then update the items in the environment
                         nextupdate = current_milli() + update_freq
+                        
+                        self.appendLastKeysForTraining(keyspressed)
                         for k in keyspressed:
                             self._actionmap.get(k, lambda:0)()
                         keyspressed = set()
+
 
                         for d in self.drones:
                             d.indicateIntent()
@@ -585,7 +643,6 @@ class App:
                         for d in self.drones:
                             for a in self.collisionActions(d):
                                 a()
-
                     self.on_loop()
                 self.on_render()
             
