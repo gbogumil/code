@@ -6,6 +6,7 @@ import logging
 import random
 import functools as ft
 import csv
+import os
 
 rand = random.random
 
@@ -157,6 +158,11 @@ class App:
         self._train_freq = 250
         self._lastTrainingOutput = current_milli()
         self._trainfolder = '../data'
+        
+        try:
+            os.makedirs(self._trainfolder)
+        except:
+            pass
         
         self._csvwriter = csv.writer(
             open('{}/dat-{}.csv'.format(self._trainfolder, self._instance), 'a', newline='')
