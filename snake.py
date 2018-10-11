@@ -4,6 +4,9 @@ import time
 import math
 import logging
 import random
+import functools as ft
+import csv
+import os
 
 rand = random.random
 
@@ -35,12 +38,13 @@ class Player:
     minspeed = 3
 
     def __init__(self, x, y):
-        self.identifier = self.instanceCounter
-        self.instanceCounter += 1
-        self.positions = []
+        Player.instanceCounter += 1
+        self.identifier = Player.instanceCounter
         self.speed = self.minspeed
-        self.cooldown = 10
         self.direction = (2.0 * math.pi) * rand()
+        self.positions = []
+
+        self.cooldown = 10
         for i in range(0, 5):
             self.positions.append((x, y, self.direction))
         self.nextPos = self.positions[-1]
@@ -121,8 +125,13 @@ class Player:
             self.positions[-1][1]
         )
 
+MOUSE = 1
+KEYBOARD = 0
+
 class App:
     def __init__(self):
+        self._instance = int(random.random() * 1e10)
+        self._trainingoutputstep = 1
         self.hitBox = None
         self.drones = []
         self.drawDebug = True
@@ -139,8 +148,25 @@ class App:
         self.playerGenerator = None
         self.ediblesGenerator = None
         self.debugFont = None
+        self.leaderboardFont = None
         self.edibleValueMax = 20
         self.initialEdibles = 300
+        self._gameOver = False
+        self._inputMode = KEYBOARD
+        self._outputTraining = True
+        self._last_keys_for_training = {}
+        self._train_freq = 250
+        self._lastTrainingOutput = current_milli()
+        self._trainfolder = '../data'
+        
+        try:
+            os.makedirs(self._trainfolder)
+        except:
+            pass
+        
+        self._csvwriter = csv.writer(
+            open('{}/dat-{}.csv'.format(self._trainfolder, self._instance), 'a', newline='')
+        )
 
     def randomPosition(self):
         return (
@@ -202,39 +228,58 @@ class App:
         player.speed = player.newSpeed
 
     def collisionActions(self, player):
-        #here we determine
-        # 1. if the player tail needs to be cut and converted to edibles
+        abort = False
+        # if the player tail needs to be cut and converted to edibles
         box = self._images['player'].get_rect()
         box.left = player.positions[-1][0]
         box.top = player.positions[-1][1]
-        self.hitBox = box
+        self.hitBox.append(box)
         for i in range(0,max(0,len(player.positions)-1-10)):
             # if we run into ourself then chop off the tail
             # skip the last 5 in the array (which is the head + 4)
             if self.hit(player.positions[i], box):
                 yield lambda: self.chopPlayer(player, i)
                 break
-        # 2. if the player ate an edible
-        # this needs to be converted into a hashed list so the positions
-        # can be searched more efficiently
+        # if the player ate an edible
         eatenEdibles = []
         for e in self.edibles:
             if self.hit(e.position, box):
                 yield lambda: self.growPlayer(player, e)
 
-        # 3> eventually if any players died by running into each other
+        # if player ran into another player
+        if player != self.player:
+            for i in range(0, len(self.player.positions)):
+                if self.hit(self.player.positions[i], box):
+                    yield lambda: self.killPlayer(player)
+                    abort = True
+        if abort:
+            return
+        for d in self.drones:
+            if d == player:
+                continue
+            for i in range(0, len(d.positions)):
+                if self.hit(d.positions[i], box):
+                    yield lambda: self.killPlayer(player)
 
     def chopPlayer(self, player, i):
-        logging.info('chopping p{1} at {0}'.format(i, player.identifier))
-        newEdibles = player.positions[:i]
+        #logging.info('chopping p{1} at {0}'.format(i, player.identifier))
+        newEdibles = player.positions[:i:7]
         player.positions = player.positions[i+1:]
         for p in newEdibles:
-            self.edibles.append(Edible(p[0], p[1], 1))
+            self.edibles.append(Edible(p[0], p[1], 7))
 
     def growPlayer(self, player, edible):
         player.grow(edible.value)
         self.edibles.remove(edible)
         #self.edibles.append(next(self.ediblesGenerator()))
+    
+    def killPlayer(self, player):
+        if player == self.player:
+            self._gameOver = True
+            return
+        self.chopPlayer(player, len(player.positions)-1)
+        if player in self.drones:
+            self.drones.remove(player)
 
     def hit(self, pos, box):
         return \
@@ -259,11 +304,28 @@ class App:
         return '({0:.2f}, {1:.2f}, {2:.2f})'.format(pos[0], pos[1], pos[2])
 
     def on_init(self):
+        self.on_init_environment()
+        self.on_init_game()
+
+    def on_init_environment(self):
         pygame.init()
         self.debugFont = pygame.font.Font(None, 20)
+        self.leaderboardFont = pygame.font.Font(None, 25)
+        windowSize = (self.viewportWidth, self.viewportHeight)
+        self._display_surf = pygame.display.set_mode(
+            (windowSize), pygame.HWSURFACE)
+        pygame.display.set_caption('Snakey eats shiney edibles')
+        i = self.loadimage('snake.png', True)
+        self._images['drone'] = pygame.transform.scale(
+            i, (int(i.get_rect().width/2), int(i.get_rect().height/2))
+        )
+        self._images['player'] = self.colorize(self._images['drone'])
+        self._images['edible'] = self.loadimage('edible.png', True)
 
+    def on_init_game(self):
         playerGenerator = self.createPlayer()
         self.player = next(playerGenerator)
+        self.drones = []
         for droneindex in range(0,self.droneCount):
             drone = next(playerGenerator)
             drone.cooldown = (1+droneindex) * 20
@@ -272,25 +334,26 @@ class App:
 
         self.ediblesGenerator = self.createEdible()
         initialEdibles = (next(self.ediblesGenerator) for i in range(0,self.initialEdibles))
+        self.edibles = []
         for e in initialEdibles:
             self.edibles.append(e)
-
-        windowSize = (self.viewportWidth,self.viewportHeight)
-        self._display_surf = pygame.display.set_mode(
-            (windowSize), pygame.HWSURFACE)
- 
-        pygame.display.set_caption('Snakey eats shiney edibles')
-        self._running = True
-        self._paused = False
-        i = self.loadimage('snake.png', True)
-        self._images['drone'] = pygame.transform.scale(i, (int(i.get_rect().width/2), int(i.get_rect().height/2)))
-        self._images['player'] = self.colorize(self._images['drone'])
-        self._images['edible'] = self.loadimage('edible.png', True)
 
         logging.info('players created')
         logging.info('player = {0}'.format(self.player.toString()))
         for index in range(0, len(self.drones)):
             logging.info('drone {0} = {1}'.format(index, self.drones[index].toString()))
+
+        self._actionmap = {
+            K_RIGHT: self.player.moveClock,
+            K_LEFT: self.player.moveCounter,
+            K_UP: self.player.speedUp,
+            K_DOWN: self.player.speedDown
+        }
+
+        self._running = True
+        self._paused = False
+        self._gameOver = False
+
     def loadimage(self, filelocation, transparent):
         ret = pygame.image.load(filelocation)
         if transparent:
@@ -310,6 +373,49 @@ class App:
         image.unlock()
         return image
 
+    def getDrawableArea(self):
+        drawableArea = [
+            self.player.positions[-1][0] - (self.viewportWidth / 2),
+            self.player.positions[-1][1] - (self.viewportHeight / 2)
+        ]
+        if drawableArea[0] < 0:
+            drawableArea[0] = 0
+        elif drawableArea[0] > self.worldWidth - self.viewportWidth:
+            drawableArea[0] = self.worldWidth - self.viewportWidth
+        if drawableArea[1] < 0:
+            drawableArea[1] = 0
+        elif drawableArea[1] > self.worldHeight - self.viewportHeight:
+            drawableArea[1] = self.worldHeight - self.viewportHeight
+        return drawableArea
+
+    def outputTrainFrame(self):
+        # keys is a set of key operations
+        # output all
+        # then output the frame 
+        pygame.image.save(self._display_surf, '{}/img-{}-{}.bmp'.format(
+            self._trainfolder, self._instance, self._trainingoutputstep)
+        )
+        rowdata = [
+            self.trainKeyOutput(K_RIGHT, K_LEFT),
+            self.trainKeyOutput(K_LEFT, K_RIGHT),
+            self.trainKeyOutput(K_UP, K_DOWN),
+            self.trainKeyOutput(K_DOWN, K_UP),
+            len(self.player.positions)
+        ]
+        self._csvwriter.writerow(rowdata)
+        self._trainingoutputstep += 1
+
+    def appendLastKeysForTraining(self, keys):
+        for k in keys:
+            self._last_keys_for_training[k] = self._last_keys_for_training.get(k, 0) + 1
+
+    def trainKeyOutput(self, key1, key2):
+        v1 = self._last_keys_for_training.get(key1, 0)
+        v2 = self._last_keys_for_training.get(key2, 0)
+        if v1 > v2:
+            return 1
+        return 0
+
     def on_event(self, event):
         if event.type == QUIT:
             self._running = False
@@ -317,6 +423,38 @@ class App:
     def on_loop(self):
         pass
  
+    def render_textlines(
+        self, lines, font, 
+        CenterX = False, CenterY = False, 
+        OffsetX = -1, OffsetY = -1, Spacing = 10
+    ):
+        sizes = [font.size(t) for t in lines]
+        heights = [s[1] for s in sizes]
+        if OffsetY == -1:
+            if CenterY:
+                textheight = ft.reduce(lambda a,v:a+v, heights)
+                totaloffsetheight = (len(sizes)-1)*Spacing
+                OffsetY = [
+                    (self.viewportHeight - textheight - totaloffsetheight) / 2]
+            else:
+                OffsetY = 0
+            
+        def getOffsetX(s):
+            if OffsetX != -1:
+                return OffsetX
+            else:
+                return (self.viewportWidth - s[0])/2
+
+        def getOffsetY(s):
+            ret = OffsetY[0]
+            OffsetY[0] += s[1] + Spacing
+            return ret
+        pos = [(getOffsetX(s), getOffsetY(s)) for s in sizes]
+        
+        for i in range(len(lines)):
+            surface = font.render(lines[i], False, Color(255,255,255))
+            self._display_surf.blit(surface, (pos[i]))
+
     def on_render_edibles(self, drawableArea):
         for e in self.edibles:
             maxEdibleValue = float(self.edibleValueMax)
@@ -342,15 +480,40 @@ class App:
     def on_render_player(self, drawableArea):
         self.drawPlayer(self.player, 'player', drawableArea)
 
+    def on_render_leaderboard(self):
+        scores = list(((str(d.identifier), len(d.positions)) for d in self.drones))
+        scores.append(('you', len(self.player.positions)))
+        scores = sorted(scores, key=lambda v: v[1], reverse=True)[:10]
+
+        offset = 0
+        for s in scores:
+            text = '{}: {}'.format(s[0],s[1])
+            surface = self.leaderboardFont.render(text, False, Color(0,255,0))
+            self._display_surf.blit(surface, (self.viewportWidth - 100, offset))
+            offset += self.leaderboardFont.size(text)[1] + 10
+        
+    def on_render_gameover(self):
+        if not self._gameOver:
+            return
+        text = [
+            'Thanks for playing', 
+            'Final score: {}'.format(len(self.player.positions)),
+            'Press R to retry'
+        ]
+        self.render_textlines(
+            text, self.leaderboardFont, CenterX=True,CenterY=True
+        )
+
     def on_render_debug(self, drawableArea, extras = None):
         if self.drawDebug:
             if self.hitBox:
-                newbox = Rect(
-                    self.hitBox.left - drawableArea[0], 
-                    self.hitBox.top - drawableArea[1],
-                    self.hitBox.width,
-                    self.hitBox.height)
-                self._display_surf.fill((255,255,0), newbox)
+                for b in self.hitBox:
+                    newbox = Rect(
+                        b.left - drawableArea[0], 
+                        b.top - drawableArea[1],
+                        b.width,
+                        b.height)
+                    self._display_surf.fill((255,255,0), newbox)
             
             if extras:
                 offset = 0
@@ -363,18 +526,7 @@ class App:
     def on_render(self):
         # center viewport as closely as possible to player
         # only render items within the viewport
-        drawableArea = [
-            self.player.positions[-1][0] - (self.viewportWidth / 2),
-            self.player.positions[-1][1] - (self.viewportHeight / 2)
-        ]
-        if drawableArea[0] < 0:
-            drawableArea[0] = 0
-        elif drawableArea[0] > self.worldWidth - self.viewportWidth:
-            drawableArea[0] = self.worldWidth - self.viewportWidth
-        if drawableArea[1] < 0:
-            drawableArea[1] = 0
-        elif drawableArea[1] > self.worldHeight - self.viewportHeight:
-            drawableArea[1] = self.worldHeight - self.viewportHeight
+        drawableArea = self.getDrawableArea()
         
         self._display_surf.fill((0,0,0))
 
@@ -382,10 +534,17 @@ class App:
         self.on_render_drones(drawableArea)
         self.on_render_player(drawableArea)
 
+        if self._outputTraining and self._lastTrainingOutput + self._train_freq < current_milli():
+            self._lastTrainingOutput = current_milli()
+            self.outputTrainFrame()
+            self._last_keys_for_training = {}
+
         extras = [self.safePos(self.player.positions[-1])]
         for d in self.drones:
             extras.append(self.safePos(d.positions[-1]))
 
+        self.on_render_leaderboard()
+        self.on_render_gameover()
         self.on_render_debug(drawableArea, extras)
         
         pygame.display.flip()
@@ -394,19 +553,18 @@ class App:
         pygame.quit()
  
     def on_execute(self):
-        if self.on_init() == False:
-            self._running = False
+        self.on_init()
 
-        actionmap = {
-            K_RIGHT: self.player.moveClock,
-            K_LEFT: self.player.moveCounter,
-            K_UP: self.player.speedUp,
-            K_DOWN: self.player.speedDown
-        }
 
         update_freq = 1000 / 30 # 30 times per second
         nextupdate = current_milli() + update_freq
+        key_freq = 250
+        lastDebugKeyPress = current_milli()
+        lastPauseKeyPress = current_milli()
+        lastModeKeyPress = current_milli()
+
         keyspressed = set()
+
         while( self._running ):
             # user inputs move suggestion
             # players desired next position is determined
@@ -416,57 +574,83 @@ class App:
             # environment updates players 
             pygame.event.pump()
             keys = pygame.key.get_pressed() 
+            mouse_pos = pygame.mouse.get_pos()
+            mouse_keys = pygame.mouse.get_pressed()
  
-            if (keys[K_RIGHT]):
-                keyspressed.add(K_RIGHT)
-            if (keys[K_LEFT]):
-                keyspressed.add(K_LEFT)
-            if (keys[K_UP]):
-                keyspressed.add(K_UP)
-            if (keys[K_DOWN]):
-                keyspressed.add(K_DOWN)
-            if (keys[K_ESCAPE]):
+            if keys[K_ESCAPE]:
                 self._running = False
-            if (keys[K_PAUSE]):
-                self._paused = not self._paused
-            if (keys[K_d]):
-                self.drawDebug = not self.drawDebug
+            if keys[K_PAUSE]:
+                if lastPauseKeyPress + key_freq < current_milli():
+                    lastPauseKeyPress = current_milli()
+                    self._paused = not self._paused
+            if keys[K_d]:
+                if lastDebugKeyPress + key_freq < current_milli():
+                    lastDebugKeyPress = current_milli()
+                    self.drawDebug = not self.drawDebug
+            if keys[K_m]:
+                if lastModeKeyPress + key_freq < current_milli():
+                    lastModeKeyPress = current_milli()
+                    if self._inputMode == KEYBOARD:
+                        self._inputMode = MOUSE
+                    else:
+                        self._inputMode = KEYBOARD
+            if self._gameOver and keys[K_r]:
+                self.on_init_game()
 
             if self._running:
-                if not self._paused and nextupdate < current_milli():
-                    # The basic loop will calculate intent of each player
-                    # then based on the intent determine if the environment
-                    # should affect that intent
-                    # then update the items in the environment
-                    nextupdate = current_milli() + update_freq
-                    for k in keyspressed:
-                        actionmap.get(k, lambda:0)()
-                    keyspressed = set()
+                if not self._paused and not self._gameOver:
+                    if (keys[K_RIGHT]):
+                        keyspressed.add(K_RIGHT)
+                    if (keys[K_LEFT]):
+                        keyspressed.add(K_LEFT)
+                    if (keys[K_UP]):
+                        keyspressed.add(K_UP)
+                    if (keys[K_DOWN]):
+                        keyspressed.add(K_DOWN)
+                    if mouse_keys[0] == MOUSEBUTTONDOWN:
+                        keyspressed.add(K_DOWN)
+                    if mouse_keys[2] == MOUSEBUTTONDOWN:
+                        keyspressed.add(K_UP)
+                    # add movement toward current mouse position
+                    if self._inputMode == MOUSE:
+                        deg = math.tanh(-1.0 * mouse_pos[1] / mouse_pos[0])
+                        # TODO: determine if we should rot cl or co
+                    if nextupdate < current_milli():
+                        # The basic loop will calculate intent of each player
+                        # then based on the intent determine if the environment
+                        # should affect that intent
+                        # then update the items in the environment
+                        nextupdate = current_milli() + update_freq
+                        
+                        self.appendLastKeysForTraining(keyspressed)
+                        for k in keyspressed:
+                            self._actionmap.get(k, lambda:0)()
+                        keyspressed = set()
 
-                    for d in self.drones:
-                        d.indicateIntent()
 
-                    self.playerWrap(self.player)
-                    #self.playerDieAtEdge(self.player)
-                    for d in self.drones:
-                    #    self.playerDieAtEdge(d)
-                        self.playerWrap(d)
-                    
-                    self.player.update(self)
-                    for d in self.drones:
-                        d.update(self)
+                        for d in self.drones:
+                            d.indicateIntent()
 
-                    for e in self.edibles:
-                        e.update(self)
+                        self.playerWrap(self.player)
+                        #self.playerDieAtEdge(self.player)
+                        for d in self.drones:
+                        #    self.playerDieAtEdge(d)
+                            self.playerWrap(d)
+                        
+                        self.player.update(self)
+                        for d in self.drones:
+                            d.update(self)
 
-                    for a in self.collisionActions(self.player):
-                        a()
-                    for d in self.drones:
-                        for a in self.collisionActions(d):
+                        for e in self.edibles:
+                            e.update(self)
+                        self.hitBox = []
+                        for a in self.collisionActions(self.player):
                             a()
-
+                        for d in self.drones:
+                            for a in self.collisionActions(d):
+                                a()
                     self.on_loop()
-                    self.on_render()
+                self.on_render()
             
         self.on_cleanup()
  
