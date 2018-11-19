@@ -421,7 +421,10 @@ class App:
             self._running = False
  
     def on_loop(self):
-        pass
+        if not self._gameOver and self._outputTraining and self._lastTrainingOutput + self._train_freq < current_milli():
+            self._lastTrainingOutput = current_milli()
+            self.outputTrainFrame()
+            self._last_keys_for_training = {}
  
     def render_textlines(
         self, lines, font, 
@@ -533,11 +536,6 @@ class App:
         self.on_render_edibles(drawableArea)
         self.on_render_drones(drawableArea)
         self.on_render_player(drawableArea)
-
-        if self._outputTraining and self._lastTrainingOutput + self._train_freq < current_milli():
-            self._lastTrainingOutput = current_milli()
-            self.outputTrainFrame()
-            self._last_keys_for_training = {}
 
         extras = [self.safePos(self.player.positions[-1])]
         for d in self.drones:
