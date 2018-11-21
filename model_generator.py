@@ -1,12 +1,13 @@
 import os
 
-base_dir = '/lib/code/data'
+base_dir = '../data'
 
 image_names = list(f for f in os.listdir(base_dir) if f[-4:].lower() == '.bmp')
 
 print(image_names[:10])
 
 print('total images: ', len(image_names))
+
 
 import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
